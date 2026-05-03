@@ -12,7 +12,7 @@ app.use((req, res, next) => {
 });
 
 app.get("/", (req, res) => {
-    res.json({ service: "LiteFinance Copy Trading API", version: "2.4" });
+    res.json({ service: "LiteFinance Copy Trading API", version: "2.5" });
 });
 
 app.get("/debug", async (req, res) => {
@@ -50,25 +50,23 @@ app.get("/trades", async (req, res) => {
         const text = $("body").text().replace(/\s+/g, " ").trim();
 
         // =============================================
-        // PARSE CHÍNH XÁC theo cấu trúc đã biết:
-        // SYMBOL (Mua|Bán) VOLUME DD.MM.YYYY HH:MM:SS OPEN CURRENT SL TP Lợi nhuận X USD
-        // Chỉ parse ROW CHÍNH, bỏ qua phần tooltip (có chữ "Giá mở cửa", "Khối lượng giao dịch")
+        // Cấu trúc 1 row lệnh:
+        // SYMBOL (Mua|Bán) VOLUME DD.MM.YYYY HH:MM:SS OPEN CURRENT SL TP Lợi nhuận -?NUMBER USD
+        // FIX v2.5: profit có thể âm (-79.62) → thêm -? vào pattern
         // =============================================
 
         const SYMBOLS = "XAUUSD|XAGUSD|BTCUSD|ETHUSD|EURUSD|GBPUSD|USDJPY|AUDCAD|NZDCAD";
 
-        // Pattern khớp đúng 1 row lệnh:
-        // SYMBOL (Mua|Bán) VOLUME DD.MM.YYYY HH:MM:SS OPEN CURRENT SL TP Lợi nhuận NUMBER USD
         const rowPattern = new RegExp(
-            `(${SYMBOLS})\\s+(Mua|Bán)\\s+` +           // symbol + type
-            `(\\d+\\.\\d+)\\s+` +                         // volume
-            `(\\d{2}\\.\\d{2}\\.\\d{4})\\s+` +            // date
-            `(\\d{2}:\\d{2}:\\d{2})\\s+` +                // time
-            `([\\d.]+)\\s+` +                              // openPrice
-            `([\\d.]+)\\s+` +                              // currentPrice
-            `([\\d.]+)\\s+` +                              // sl
-            `([\\d.]+)\\s+` +                              // tp
-            `Lợi nhuận\\s+([\\d.,-]+)\\s+USD`,            // profit (để bỏ)
+            `(${SYMBOLS})\\s+(Mua|Bán)\\s+` +       // symbol + type
+            `(\\d+\\.\\d+)\\s+` +                     // volume
+            `(\\d{2}\\.\\d{2}\\.\\d{4})\\s+` +        // date DD.MM.YYYY
+            `(\\d{2}:\\d{2}:\\d{2})\\s+` +            // time HH:MM:SS
+            `([\\d.]+)\\s+` +                          // openPrice
+            `([\\d.]+)\\s+` +                          // currentPrice
+            `([\\d.]+)\\s+` +                          // sl
+            `([\\d.]+)\\s+` +                          // tp
+            `Lợi nhuận\\s+-?[\\d.,]+\\s+USD`,         // profit (bỏ, có thể âm)
             'gi'
         );
 
@@ -79,35 +77,29 @@ app.get("/trades", async (req, res) => {
         let ticket = 100000;
 
         for (const m of matches) {
-            const symbol      = m[1].replace("_m","").toUpperCase();
-            const type        = /Bán/i.test(m[2]) ? 1 : 0;
-            const volume      = parseFloat(m[3]);
-            const dateStr     = m[4]; // DD.MM.YYYY
-            const timeStr     = m[5]; // HH:MM:SS
-            const openPrice   = parseFloat(m[6]);
-            const currentPrice= parseFloat(m[7]);
-            const slRaw       = parseFloat(m[8]);
-            const tpRaw       = parseFloat(m[9]);
-            // m[10] = profit, bỏ qua
+            const symbol       = m[1].replace("_m","").toUpperCase();
+            const type         = /Bán/i.test(m[2]) ? 1 : 0;
+            const volume       = parseFloat(m[3]);
+            const [day, month, year] = m[4].split(".");
+            const openTime     = `${year}-${month}-${day}T${m[5]}Z`;
+            const openPrice    = parseFloat(m[6]);
+            const currentPrice = parseFloat(m[7]);
+            const slRaw        = parseFloat(m[8]);
+            const tpRaw        = parseFloat(m[9]);
 
-            // Parse datetime
-            const [day, month, year] = dateStr.split(".");
-            const openTime = `${year}-${month}-${day}T${timeStr}Z`;
-
-            // Validate SL: BUY → SL < open, SELL → SL > open
+            // Validate SL/TP theo hướng lệnh
             const sl = slRaw > 0 && (
-                (type === 0 && slRaw < openPrice) ||
-                (type === 1 && slRaw > openPrice)
+                (type === 0 && slRaw < openPrice) ||  // BUY: SL < entry
+                (type === 1 && slRaw > openPrice)     // SELL: SL > entry
             ) ? slRaw : 0;
 
-            // Validate TP: BUY → TP > open, SELL → TP < open
             const tp = tpRaw > 0 && (
-                (type === 0 && tpRaw > openPrice) ||
-                (type === 1 && tpRaw < openPrice)
+                (type === 0 && tpRaw > openPrice) ||  // BUY: TP > entry
+                (type === 1 && tpRaw < openPrice)     // SELL: TP < entry
             ) ? tpRaw : 0;
 
             const position = { ticket: ticket++, symbol, type, volume, openPrice, currentPrice, sl, tp, openTime };
-            console.log("✅", position);
+            console.log("✅", JSON.stringify(position));
             positions.push(position);
         }
 
@@ -129,5 +121,5 @@ app.get("/trades", async (req, res) => {
 
 app.get("/health", (req, res) => res.json({ status: "ok", timestamp: new Date().toISOString() }));
 
-const server = app.listen(PORT, () => console.log(`LiteFinance API v2.4 running on port ${PORT}`));
+const server = app.listen(PORT, () => console.log(`LiteFinance API v2.5 running on port ${PORT}`));
 process.on('SIGTERM', () => server.close());
