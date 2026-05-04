@@ -444,15 +444,27 @@ app.get("/debug", async (req, res) => {
         const url =
             `https://my.litefinance.com.vn/vi/traders/${page}?id=${accountId}`;
 
-        const response = await axios.get(url, {
-            headers: {
-                "User-Agent": "Mozilla/5.0",
-                "Accept-Language": "vi-VN,vi;q=0.9"
-            },
-            timeout: 15000
-        });
+        const puppeteer = require("puppeteer");
 
-        const $ = cheerio.load(response.data);
+const browser = await puppeteer.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"]
+});
+
+const page = await browser.newPage();
+
+await page.goto(url, {
+    waitUntil: "networkidle2",
+    timeout: 30000
+});
+
+await page.waitForTimeout(5000);
+
+const html = await page.content();
+
+await browser.close();
+
+const $ = cheerio.load(html);
 
         const text =
             $("body")
